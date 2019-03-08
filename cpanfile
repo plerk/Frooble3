@@ -9,3 +9,4 @@ requires 'LWP::Protocol::https';
 requires 'Cpanel::JSON::XS';
 requires 'HTML::HTML5::Entities';
 requires 'YAML';
+requires 'Moo';
