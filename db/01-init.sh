@@ -165,7 +165,7 @@ psql -U frooble3 frooble3 -v ON_ERROR_STOP=1 <<'EOSQL'
 
   CREATE TABLE report_data (
     guid             CHAR(36) PRIMARY KEY NOT NULL,
-    date             DATE,
+    date             TIMESTAMP,
     release_id       INTEGER REFERENCES release(id) NOT NULL,
     grade            grade_type NOT NULL,
     os_id            INTEGER REFERENCES os(id) NOT NULL,

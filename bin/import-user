@@ -3,17 +3,14 @@
 use strict;
 use warnings;
 use 5.028;
-use MetaCPAN::Client;
-use DBD::Pg;
-use URI;
-use Cpanel::JSON::XS qw( decode_json );
-use LWP::UserAgent;
+use lib::findbin '../lib';
+use Frooble3;
+
 use HTML::HTML5::Entities qw( decode_entities );
 use YAML qw( Dump );
 
-my $mcpan = MetaCPAN::Client->new;
 my $author = shift(@ARGV) // 'PLICEASE';
-my $dbh = DBI->connect('dbi:Pg:db=frooble3', 'frooble3', 'frooble3', { AutoCommit => 0, RaiseError => 1 });
+my $dbh = Frooble3->dbh;
 
 # update release table for author:
 {
@@ -21,7 +18,7 @@ my $dbh = DBI->connect('dbi:Pg:db=frooble3', 'frooble3', 'frooble3', { AutoCommi
 
   foreach my $status (qw( latest cpan ))
   {
-    my $spec = $mcpan->release({
+    my $spec = Frooble3->metacpan->release({
       all => [
         { status => $status },
         { author => $author },
@@ -84,7 +81,7 @@ my $dbh = DBI->connect('dbi:Pg:db=frooble3', 'frooble3', 'frooble3', { AutoCommi
   $sth->execute;
   while(my $h = $sth->fetchrow_hashref)
   {
-    my $release = $mcpan->release({
+    my $release = Frooble3->metacpan->release({
       all => [
         { distribution => $h->{dist}    },
         { version      => $h->{version} },
@@ -124,12 +121,7 @@ my $dbh = DBI->connect('dbi:Pg:db=frooble3', 'frooble3', 'frooble3', { AutoCommi
   });
   $select->execute($author);
 
-  # Accept: application/json
-  my $ua = LWP::UserAgent->new;
-  $ua->default_header( Accept => 'application/json' );
-  my $base_uri = URI->new('https://api.cpantesters.org');
-
-  my @fields = qw( dist grade guid osname osvers platform perl reporter version );
+  my @fields = qw( dist date grade guid osname osvers platform perl reporter version );
 
   my $insert = $dbh->prepare(qq{
     INSERT INTO report (@{[ join(',', @fields) ]}) VALUES (@{[ join(',', map { '?' } @fields) ]})
@@ -141,49 +133,24 @@ my $dbh = DBI->connect('dbi:Pg:db=frooble3', 'frooble3', 'frooble3', { AutoCommi
 
   while(my $h = $select->fetchrow_hashref)
   {
-    my $uri = $base_uri->clone;
-    $uri->path("/v3/summary/@{[ $h->{dist} ]}/@{[ $h->{version} ]}");
-    my $res = $ua->get($uri);
-
-    if($res->is_success)
+    say "@{[ $h->{dist} ]}-@{[ $h->{version} ]}";
+    my %count;
+    foreach my $report ( Frooble3->ct->summary($h->{dist}, $h->{version}) )
     {
-      say "@{[ $h->{dist} ]}-@{[ $h->{version} ]}";
-      my %count;
-      foreach my $report ( decode_json($res->decoded_content)->@* )
+      $check->execute($report->{guid});
+      next if $check->fetchrow_hashref;
+      $count{$report->{grade}}++;
+      $report->{reporter} = decode_entities $report->{reporter};
+      my %r = %$report;
+      my @values = map { delete $r{$_} } @fields;
+      if(%r)
       {
-        $check->execute($report->{guid});
-        next if $check->fetchrow_hashref;
-        $count{$report->{grade}}++;
-        $report->{reporter} = decode_entities $report->{reporter};
-        my %r = %$report;
-        my $date = delete $r{date};
-        my @values = map { delete $r{$_} } @fields;
-        if(%r)
-        {
-          print STDERR Dump($report);
-          die "extra fields: @{[ sort keys %r ]}";
-        }
-        $insert->execute(@values);
+        print STDERR Dump($report);
+        die "extra fields: @{[ sort keys %r ]}";
       }
-      print Dump(\%count);
-      $dbh->commit;
+      $insert->execute(@values);
     }
-    else
-    {
-      say STDERR $res->status_line;
-    }
+    print Dump(\%count) if %count;
+    $dbh->commit;
   }
 }
-
-#---
-#date: 2019-03-04T01:04:00Z
-#dist: Alien-automake
-#grade: pass
-#guid: 6eb2669a-3e19-11e9-9c48-7da8cead5ccb
-#osname: linux
-#osvers: 4.14.0-3-amd64
-#perl: 5.29.8
-#platform: x86_64-linux-ld
-#reporter: '"Andreas J. K?nig (ANDK)" <andreas.koenig.gmwojprw@franz.ak.mind.de ((Andreas J. Koenig))>'
-#version: 0.14
-
