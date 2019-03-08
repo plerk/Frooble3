@@ -12,10 +12,14 @@ EOSQL
 
 psql -U frooble3 frooble3 -v ON_ERROR_STOP=1 <<'EOSQL'
 
+  CREATE TYPE release_type AS ENUM ('latest','cpan','backpan','unknown');
+
   CREATE TABLE release (
     id SERIAL PRIMARY KEY NOT NULL,
+    author VARCHAR(128),
     dist VARCHAR(128) NOT NULL,
     version VARCHAR(128) NOT NULL,
+    type release_type NOT NULL DEFAULT 'unknown',
     UNIQUE(dist,version)
   );
 
@@ -24,6 +28,7 @@ psql -U frooble3 frooble3 -v ON_ERROR_STOP=1 <<'EOSQL'
       DECLARE
         id INTEGER;
       BEGIN
+        v := COALESCE(v, '-');
         SELECT
           r.id INTO id
         FROM
@@ -49,27 +54,31 @@ psql -U frooble3 frooble3 -v ON_ERROR_STOP=1 <<'EOSQL'
   CREATE TABLE os (
     id SERIAL PRIMARY KEY NOT NULL,
     name VARCHAR(128) NOT NULL,
+    version VARCHAR(128) NOT NULL,
     platform VARCHAR(128) NOT NULL,
-    UNIQUE(name,platform)
+    UNIQUE(name,version,platform)
   );
 
   CREATE FUNCTION
-    lookup_os(n TEXT, p TEXT) RETURNS INTEGER AS $$
+    lookup_os(n TEXT, v TEXT, p TEXT) RETURNS INTEGER AS $$
       DECLARE
         id INTEGER;
       BEGIN
+        n := COALESCE(n, '-');
+        v := COALESCE(v, '-');
+        p := COALESCE(p, '-');
         SELECT
           o.id INTO id
         FROM
           os AS o
         WHERE
-          o.name = n AND o.platform = p;
+          o.name = n AND o.version = v AND o.platform = p;
         IF id IS NULL THEN
           BEGIN
             INSERT INTO
-              os (name, platform)
+              os (name, version, platform)
             VALUES
-              (n,p);
+              (n,v,p);
             SELECT
               currval(pg_get_serial_sequence('os','id'))
             INTO
@@ -90,6 +99,7 @@ psql -U frooble3 frooble3 -v ON_ERROR_STOP=1 <<'EOSQL'
       DECLARE
         id INTEGER;
       BEGIN
+        n := COALESCE(n, '-');
         SELECT
           p.id INTO id
         FROM
@@ -122,6 +132,7 @@ psql -U frooble3 frooble3 -v ON_ERROR_STOP=1 <<'EOSQL'
       DECLARE
         id INTEGER;
       BEGIN
+        n := COALESCE(n, '-');
         SELECT
           r.id INTO id
         FROM
@@ -144,7 +155,7 @@ psql -U frooble3 frooble3 -v ON_ERROR_STOP=1 <<'EOSQL'
       END;
     $$ LANGUAGE plpgsql;
 
-  CREATE TYPE grade_type AS ENUM ('pass','fail','na','unknown','null');
+  CREATE TYPE grade_type AS ENUM ('pass','fail','na','unknown','-');
 
   CREATE TABLE ignore_report (
     id SERIAL PRIMARY KEY NOT NULL,
@@ -177,7 +188,8 @@ psql -U frooble3 frooble3 -v ON_ERROR_STOP=1 <<'EOSQL'
       rl.dist             AS dist,
       rl.version          AS version,
       rp.grade            AS grade,
-      o.name              AS os,
+      o.name              AS osname,
+      o.version           AS osvers,
       o.platform          AS platform,
       p.name              AS perl,
       u.name              AS reporter,
@@ -189,6 +201,26 @@ psql -U frooble3 frooble3 -v ON_ERROR_STOP=1 <<'EOSQL'
       reporter    AS u  ON rp.reporter_id = u.id  JOIN
       os          AS o  ON rp.os_id       = o.id
   ;
+
+  CREATE FUNCTION triggerf_insert_report() RETURNS TRIGGER AS $$
+    BEGIN
+      INSERT INTO report_data
+        (guid, date, release_id, grade, os_id, perl_id, reporter_id, ignore_report_id)
+      VALUES
+        (NEW.guid, NEW.date,
+          lookup_release(NEW.dist,NEW.version),
+          COALESCE(NEW.grade, '-'),
+          lookup_os(NEW.osname, NEW.osvers, NEW.platform),
+          lookup_perl(NEW.perl),
+          lookup_reporter(NEW.reporter),
+          NEW.ignore_report_id
+        );
+      RETURN NEW;
+    END;
+  $$ LANGUAGE plpgsql;
+
+  CREATE TRIGGER trigger_insert_report INSTEAD OF INSERT ON report FOR EACH ROW
+  EXECUTE PROCEDURE triggerf_insert_report();
 
   CREATE TABLE url (
     guid CHAR(36) PRIMARY KEY NOT NULL REFERENCES report_data(guid),
