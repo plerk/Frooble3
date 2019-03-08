@@ -2,7 +2,7 @@
 
 use strict;
 use warnings;
-use 5.028;
+use 5.026;
 use lib::findbin '../lib';
 use Frooble3;
 use YAML qw( Dump );

@@ -2,7 +2,7 @@ package Frooble3::Importer {
 
   use strict;
   use warnings;
-  use 5.028;
+  use 5.026;
   use Moo;
   use experimental qw( signatures );
   use HTML::HTML5::Entities ();
