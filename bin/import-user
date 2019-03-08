@@ -5,8 +5,6 @@ use warnings;
 use 5.028;
 use lib::findbin '../lib';
 use Frooble3;
-
-use HTML::HTML5::Entities qw( decode_entities );
 use YAML qw( Dump );
 
 my $author = shift(@ARGV) // 'PLICEASE';
@@ -108,7 +106,7 @@ my $dbh = Frooble3->dbh;
   $dbh->commit;
 }
 
-# fetch reports from ct
+# fetch reports from ct, and ingest
 {
   my $select = $dbh->prepare(q{
     SELECT
@@ -121,36 +119,12 @@ my $dbh = Frooble3->dbh;
   });
   $select->execute($author);
 
-  my @fields = qw( dist date grade guid osname osvers platform perl reporter version );
-
-  my $insert = $dbh->prepare(qq{
-    INSERT INTO report (@{[ join(',', @fields) ]}) VALUES (@{[ join(',', map { '?' } @fields) ]})
-  });
-
-  my $check = $dbh->prepare(q{
-    SELECT guid FROM report WHERE guid = ?
-  });
-
   while(my $h = $select->fetchrow_hashref)
   {
-    say "@{[ $h->{dist} ]}-@{[ $h->{version} ]}";
-    my %count;
-    foreach my $report ( Frooble3->ct->summary($h->{dist}, $h->{version}) )
-    {
-      $check->execute($report->{guid});
-      next if $check->fetchrow_hashref;
-      $count{$report->{grade}}++;
-      $report->{reporter} = decode_entities $report->{reporter};
-      my %r = %$report;
-      my @values = map { delete $r{$_} } @fields;
-      if(%r)
-      {
-        print STDERR Dump($report);
-        die "extra fields: @{[ sort keys %r ]}";
-      }
-      $insert->execute(@values);
-    }
-    print Dump(\%count) if %count;
-    $dbh->commit;
+    my @reports = Frooble3->ct->summary($h->{dist}, $h->{version});
+    my %count   = Frooble3->importer->ingest(@reports);
+    printf "pass: %5d fail: %5d nana: %5d unkn: %5d %s-%s\n",
+       $count{pass}//0, $count{fail}//0, $count{na}//0, $count{unknown}//0, $h->{dist}, $h->{version}
+       if %count;
   }
 }

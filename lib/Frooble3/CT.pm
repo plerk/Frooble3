@@ -6,7 +6,6 @@ package Frooble3::CT {
   use Moo;
   use experimental qw( signatures );
   use Cpanel::JSON::XS ();
-  #qw( decode_json );
 
   has ua => (
     is      => 'ro',

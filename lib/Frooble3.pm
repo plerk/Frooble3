@@ -31,6 +31,17 @@ package Frooble3 {
     };
   }
 
+  sub importer
+  {
+    state $importer;
+    $importer ||= do {
+      require Frooble3::Importer;
+      Frooble3::Importer->new(
+        dbh => __PACKAGE__->dbh,
+      );
+    };
+  }
+
 };
 
 1;
